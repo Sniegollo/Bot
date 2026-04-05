@@ -94,8 +94,8 @@ async def status(interaction: discord.Interaction, uid: str):
 # 💰 PREMIE (widoczne dla wszystkich) + reset raportów
 @bot.tree.command(name="premie")
 async def premie(interaction: discord.Interaction):
-    # 🔹 Sprawdzenie roli
-    if "14 | Boss" not in [r.name for r in interaction.user.roles]:
+    # 🔹 Sprawdzenie po ID roli
+    if 1487776187848724496 not in [r.id for r in interaction.user.roles]:
         await interaction.response.send_message("❌ Brak dostępu", ephemeral=True)
         return
 

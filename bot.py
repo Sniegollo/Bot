@@ -143,15 +143,10 @@ async def panel_delete(interaction: discord.Interaction):
 # ---------------- RAPORT ----------------
 @bot.tree.command(name="raport")
 @app_commands.describe(uid="UID", ilosc="Ilość sztuk", screen="Screen")
-@app_commands.autocomplete(item=lambda interaction, current: [
-    app_commands.Choice(name=i['item'], value=i['item'])
-    for i in config_collection.find_one({"guild_id": interaction.guild.id}).get("cennik", [])
-    if current.lower() in i['item'].lower()
-])
 async def raport(interaction: discord.Interaction, uid: str, item: str, ilosc: int, screen: discord.Attachment):
     config = config_collection.find_one({"guild_id": interaction.guild.id})
-    if not config:
-        await interaction.response.send_message("❌ Panel nie ustawiony.", ephemeral=True)
+    if not config or not config.get("cennik"):
+        await interaction.response.send_message("❌ Panel nie ustawiony lub brak itemów w cenniku", ephemeral=True)
         return
 
     if not config.get("role_raport") or config["role_raport"] not in [r.id for r in interaction.user.roles]:
@@ -177,6 +172,15 @@ async def raport(interaction: discord.Interaction, uid: str, item: str, ilosc: i
     })
 
     await interaction.response.send_message(f"✅ Dodano raport {item} ({int(kwota)}$)", ephemeral=True)
+
+# ---------------- AUTOCOMPLETE RAPORT ----------------
+@raport.autocomplete('item')
+async def item_autocomplete(interaction: discord.Interaction, current: str):
+    config = config_collection.find_one({"guild_id": interaction.guild.id})
+    if not config or not config.get("cennik"):
+        return []
+    return [app_commands.Choice(name=i['item'], value=i['item'])
+            for i in config['cennik'] if current.lower() in i['item'].lower()]
 
 # ---------------- STATUS ----------------
 @bot.tree.command(name="status")

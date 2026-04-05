@@ -126,6 +126,21 @@ async def panel_edit(interaction: discord.Interaction):
     view = PanelEditView(interaction.guild.id)
     await interaction.response.send_message("🛠 Panel edycji:", view=view, ephemeral=True)
 
+# ---------------- PANEL DELETE ----------------
+@bot.tree.command(name="panel_delete")
+async def panel_delete(interaction: discord.Interaction):
+    if interaction.user.id != interaction.guild.owner_id:
+        await interaction.response.send_message("❌ Tylko właściciel może usuwać panel", ephemeral=True)
+        return
+
+    config = config_collection.find_one({"guild_id": interaction.guild.id})
+    if not config:
+        await interaction.response.send_message("❌ Panel nie istnieje", ephemeral=True)
+        return
+
+    config_collection.delete_one({"guild_id": interaction.guild.id})
+    await interaction.response.send_message("🗑️ Panel został usunięty. Wszystkie konfiguracje panelu wyczyszczone.", ephemeral=True)
+
 # ---------------- RAPORT ----------------
 @bot.tree.command(name="raport")
 @app_commands.describe(uid="UID", item="Przedmiot z cennika", ilosc="Ilość sztuk", screen="Screen")

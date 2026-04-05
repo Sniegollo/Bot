@@ -4,7 +4,7 @@ from discord import app_commands
 from pymongo import MongoClient
 import os
 
-# 🔐 Bezpieczny token i MongoDB URL z ENV
+# 🔐 Token i MongoDB URL z ENV
 TOKEN = os.getenv("TOKEN")
 MONGO_URL = os.getenv("MONGO_URL")
 
@@ -68,13 +68,17 @@ async def raport(interaction: discord.Interaction, item: app_commands.Choice[str
     })
 
     await interaction.response.send_message(
-        f"✅ Raport zapisany!\n{item.value} | Ilość: {ilosc} = {kwota}$\n📸 Screen dodany!",
+        f"✅ Raport zapisany!\n{item.value} | Ilość: {ilosc} = {int(kwota)}$\n📸 Screen dodany!",
         ephemeral=True
     )
 
 # 📊 STATUS
 @bot.tree.command(name="status")
 async def status(interaction: discord.Interaction, uid: str):
+    if "Blake Family" not in [r.name for r in interaction.user.roles]:
+        await interaction.response.send_message("❌ Brak dostępu", ephemeral=True)
+        return
+
     raporty = collection.find({"uid": uid, "status": "zaakceptowany"})
     suma = 0
     count = 0
@@ -83,7 +87,7 @@ async def status(interaction: discord.Interaction, uid: str):
         count += 1
 
     await interaction.response.send_message(
-        f"📊 Raporty zaakceptowane: {count}\n💰 Zarobek: {suma}$",
+        f"📊 Raporty zaakceptowane: {count}\n💰 Zarobek: {int(suma)}$",
         ephemeral=True
     )
 
@@ -98,7 +102,7 @@ async def premie(interaction: discord.Interaction):
 
     text = ""
     for uid, kwota in suma.items():
-        text += f"{uid};{kwota};Premia\n"
+        text += f"{uid};{int(kwota)};Premia\n"
 
     await interaction.response.send_message(text or "Brak danych", ephemeral=False)
 
@@ -112,11 +116,13 @@ class VerifyButtons(discord.ui.View):
     async def accept(self, interaction: discord.Interaction, button: discord.ui.Button):
         collection.update_one({"id": self.report_id}, {"$set": {"status": "zaakceptowany"}})
         await interaction.response.send_message("✅ Zaakceptowano", ephemeral=True)
+        await interaction.message.delete()  # usuwa raport z widoku
 
     @discord.ui.button(label="❌ Odrzuć", style=discord.ButtonStyle.danger)
     async def reject(self, interaction: discord.Interaction, button: discord.ui.Button):
         collection.update_one({"id": self.report_id}, {"$set": {"status": "odrzucony"}})
         await interaction.response.send_message("❌ Odrzucono", ephemeral=True)
+        await interaction.message.delete()  # usuwa raport z widoku
 
 # 👑 WERYFIKACJA
 @bot.tree.command(name="weryfikacja")
@@ -140,12 +146,12 @@ async def weryfikacja(interaction: discord.Interaction):
             for r in raporty:
                 embed = discord.Embed(
                     title=f"UID {r['uid']}",
-                    description=f"{r['item']} | Ilość: {r['ilosc']}\n💰 {r['kwota']}$"
+                    description=f"{r['item']} | Ilość: {r['ilosc']}\n💰 {int(r['kwota'])}$"
                 )
                 if r["img"]:
                     embed.set_image(url=r["img"])
-                await interaction.channel.send(embed=embed, view=VerifyButtons(r["id"]))
-            await interaction.response.send_message("Wyświetlono raporty", ephemeral=True)
+                await interaction.user.send(embed=embed, view=VerifyButtons(r["id"]))  # wysyłamy prywatnie
+            await interaction.response.send_message("📨 Raporty wysłane prywatnie", ephemeral=True)
 
     view = discord.ui.View()
     view.add_item(UIDSelect())

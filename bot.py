@@ -68,7 +68,6 @@ class RoleModal(discord.ui.Modal, title="Wprowadź ID roli"):
 # ---------------- PANEL ----------------
 @bot.tree.command(name="panel")
 async def panel(interaction: discord.Interaction):
-    """Tworzy pusty panel (tylko serwer i pola)."""
     if interaction.user.id != interaction.guild.owner_id:
         await interaction.response.send_message("❌ Tylko właściciel może tworzyć panel", ephemeral=True)
         return
@@ -114,7 +113,6 @@ class PanelEditView(discord.ui.View):
 
 @bot.tree.command(name="panel_edit")
 async def panel_edit(interaction: discord.Interaction):
-    """Tu dodajesz cennik i rangi panelu."""
     if interaction.user.id != interaction.guild.owner_id:
         await interaction.response.send_message("❌ Tylko właściciel może edytować panel", ephemeral=True)
         return
@@ -130,7 +128,6 @@ async def panel_edit(interaction: discord.Interaction):
 # ---------------- PANEL DELETE ----------------
 @bot.tree.command(name="panel_delete")
 async def panel_delete(interaction: discord.Interaction):
-    """Usuwa konfigurację panelu, żeby móc zacząć od nowa."""
     if interaction.user.id != interaction.guild.owner_id:
         await interaction.response.send_message("❌ Tylko właściciel może usuwać panel", ephemeral=True)
         return
@@ -145,7 +142,12 @@ async def panel_delete(interaction: discord.Interaction):
 
 # ---------------- RAPORT ----------------
 @bot.tree.command(name="raport")
-@app_commands.describe(uid="UID", item="Przedmiot z cennika", ilosc="Ilość sztuk", screen="Screen")
+@app_commands.describe(uid="UID", ilosc="Ilość sztuk", screen="Screen")
+@app_commands.autocomplete(item=lambda interaction, current: [
+    app_commands.Choice(name=i['item'], value=i['item'])
+    for i in config_collection.find_one({"guild_id": interaction.guild.id}).get("cennik", [])
+    if current.lower() in i['item'].lower()
+])
 async def raport(interaction: discord.Interaction, uid: str, item: str, ilosc: int, screen: discord.Attachment):
     config = config_collection.find_one({"guild_id": interaction.guild.id})
     if not config:
@@ -157,7 +159,7 @@ async def raport(interaction: discord.Interaction, uid: str, item: str, ilosc: i
         return
 
     cennik = config.get("cennik", [])
-    entry = next((x for x in cennik if x["item"].lower() == item.lower()), None)
+    entry = next((x for x in cennik if x["item"] == item), None)
     if not entry:
         await interaction.response.send_message("❌ Brak takiego przedmiotu w cenniku", ephemeral=True)
         return
@@ -180,11 +182,7 @@ async def raport(interaction: discord.Interaction, uid: str, item: str, ilosc: i
 @bot.tree.command(name="status")
 async def status(interaction: discord.Interaction, uid: str):
     config = config_collection.find_one({"guild_id": interaction.guild.id})
-    if not config:
-        await interaction.response.send_message("❌ Brak panelu", ephemeral=True)
-        return
-
-    if not config.get("role_raport") or config["role_raport"] not in [r.id for r in interaction.user.roles]:
+    if not config or not config.get("role_raport") or config["role_raport"] not in [r.id for r in interaction.user.roles]:
         await interaction.response.send_message("❌ Brak dostępu", ephemeral=True)
         return
 
@@ -211,11 +209,7 @@ class WeryfikacjaView(discord.ui.View):
 @bot.tree.command(name="weryfikacja")
 async def weryfikacja(interaction: discord.Interaction):
     config = config_collection.find_one({"guild_id": interaction.guild.id})
-    if not config or not config.get("role_weryfikacja"):
-        await interaction.response.send_message("❌ Brak konfiguracji lub roli weryfikacji", ephemeral=True)
-        return
-
-    if config["role_weryfikacja"] not in [r.id for r in interaction.user.roles]:
+    if not config or not config.get("role_weryfikacja") or config["role_weryfikacja"] not in [r.id for r in interaction.user.roles]:
         await interaction.response.send_message("❌ Brak dostępu", ephemeral=True)
         return
 
@@ -236,11 +230,7 @@ async def weryfikacja(interaction: discord.Interaction):
 @bot.tree.command(name="premie")
 async def premie(interaction: discord.Interaction):
     config = config_collection.find_one({"guild_id": interaction.guild.id})
-    if not config or not config.get("role_premie"):
-        await interaction.response.send_message("❌ Brak konfiguracji lub roli premii", ephemeral=True)
-        return
-
-    if config["role_premie"] not in [r.id for r in interaction.user.roles]:
+    if not config or not config.get("role_premie") or config["role_premie"] not in [r.id for r in interaction.user.roles]:
         await interaction.response.send_message("❌ Brak dostępu", ephemeral=True)
         return
 

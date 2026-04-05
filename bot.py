@@ -49,7 +49,7 @@ async def raport(interaction: discord.Interaction, item: app_commands.Choice[str
 
     # Liczymy kwotę
     if item.value in RYBY:
-        kwota = CENNIK[item.value] * (ilosc / 1000)  # ryby: ilość dzielona przez 1000
+        kwota = CENNIK[item.value] * (ilosc / 1000)
     else:
         kwota = CENNIK[item.value] * ilosc
 
@@ -91,7 +91,7 @@ async def status(interaction: discord.Interaction, uid: str):
         ephemeral=True
     )
 
-# 💰 PREMIE (widoczne dla wszystkich)
+# 💰 PREMIE (widoczne dla wszystkich) + reset raportów
 @bot.tree.command(name="premie")
 async def premie(interaction: discord.Interaction):
     raporty = collection.find({"status": "zaakceptowany"})
@@ -106,6 +106,9 @@ async def premie(interaction: discord.Interaction):
 
     await interaction.response.send_message(text or "Brak danych", ephemeral=False)
 
+    # 🔹 Resetujemy zaakceptowane raporty
+    collection.delete_many({"status": "zaakceptowany"})
+
 # 🔘 PRZYCISKI do weryfikacji
 class VerifyButtons(discord.ui.View):
     def __init__(self, report_id):
@@ -116,13 +119,13 @@ class VerifyButtons(discord.ui.View):
     async def accept(self, interaction: discord.Interaction, button: discord.ui.Button):
         collection.update_one({"id": self.report_id}, {"$set": {"status": "zaakceptowany"}})
         await interaction.response.send_message("✅ Zaakceptowano", ephemeral=True)
-        await interaction.message.delete()  # usuwa raport z widoku
+        await interaction.message.delete()
 
     @discord.ui.button(label="❌ Odrzuć", style=discord.ButtonStyle.danger)
     async def reject(self, interaction: discord.Interaction, button: discord.ui.Button):
         collection.update_one({"id": self.report_id}, {"$set": {"status": "odrzucony"}})
         await interaction.response.send_message("❌ Odrzucono", ephemeral=True)
-        await interaction.message.delete()  # usuwa raport z widoku
+        await interaction.message.delete()
 
 # 👑 WERYFIKACJA
 @bot.tree.command(name="weryfikacja")
@@ -150,7 +153,7 @@ async def weryfikacja(interaction: discord.Interaction):
                 )
                 if r["img"]:
                     embed.set_image(url=r["img"])
-                await interaction.user.send(embed=embed, view=VerifyButtons(r["id"]))  # wysyłamy prywatnie
+                await interaction.user.send(embed=embed, view=VerifyButtons(r["id"]))  # prywatnie
             await interaction.response.send_message("📨 Raporty wysłane prywatnie", ephemeral=True)
 
     view = discord.ui.View()

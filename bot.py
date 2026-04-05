@@ -94,6 +94,11 @@ async def status(interaction: discord.Interaction, uid: str):
 # 💰 PREMIE (widoczne dla wszystkich) + reset raportów
 @bot.tree.command(name="premie")
 async def premie(interaction: discord.Interaction):
+    # 🔹 Sprawdzenie roli
+    if "14 | Boss" not in [r.name for r in interaction.user.roles]:
+        await interaction.response.send_message("❌ Brak dostępu", ephemeral=True)
+        return
+
     raporty = collection.find({"status": "zaakceptowany"})
     suma = {}
     for r in raporty:
@@ -108,7 +113,7 @@ async def premie(interaction: discord.Interaction):
 
     # 🔹 Resetujemy zaakceptowane raporty
     collection.delete_many({"status": "zaakceptowany"})
-
+    
 # 🔘 PRZYCISKI do weryfikacji
 class VerifyButtons(discord.ui.View):
     def __init__(self, report_id):

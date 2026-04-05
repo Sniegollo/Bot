@@ -19,19 +19,20 @@ intents.members = True
 
 bot = commands.Bot(command_prefix="!", intents=intents)
 
-# 📜 CENNIK
+# 📜 CENNIK (liczymy za 1 sztukę rudy / 1000 sztuk ryb)
 CENNIK = {
-    "Leszcz": {"cena": 1400, "jednostka": "kg"},
-    "Karmazyn": {"cena": 2000, "jednostka": "kg"},
-    "Płoć": {"cena": 1600, "jednostka": "kg"},
-    "Karaś srebrzysty": {"cena": 1450, "jednostka": "kg"},
-    "Vobla": {"cena": 1200, "jednostka": "kg"},
-    "Sum brązowy": {"cena": 1400, "jednostka": "kg"},
-    "Ruda żelaza": {"cena": 50, "jednostka": "szt"},
-    "Ruda złota": {"cena": 600, "jednostka": "szt"}
+    "Leszcz": 1400,           # cena za 1000 sztuk
+    "Karmazyn": 2000,
+    "Płoć": 1600,
+    "Karaś srebrzysty": 1450,
+    "Vobla": 1200,
+    "Sum brązowy": 1400,
+    "Ruda żelaza": 50,        # cena za 1 sztukę
+    "Ruda złota": 600
 }
 
-# 🚀 Start bota
+RYBY = ["Leszcz", "Karmazyn", "Płoć", "Karaś srebrzysty", "Vobla", "Sum brązowy"]
+
 @bot.event
 async def on_ready():
     await bot.tree.sync()
@@ -45,14 +46,11 @@ async def raport(interaction: discord.Interaction, item: app_commands.Choice[str
         await interaction.response.send_message("❌ Brak dostępu", ephemeral=True)
         return
 
-    cena = CENNIK[item.value]["cena"]
-    jednostka = CENNIK[item.value]["jednostka"]
-
-    # 🔢 Liczenie sztuk
-    if jednostka == "kg":
-        kwota = cena * ilosc * 1000  # 1 kg = 1000 sztuk
+    # Liczymy kwotę
+    if item.value in RYBY:
+        kwota = CENNIK[item.value] * (ilosc / 1000)  # ilość podzielona przez 1000
     else:
-        kwota = cena * ilosc
+        kwota = CENNIK[item.value] * ilosc
 
     report_id = collection.count_documents({}) + 1
 
@@ -62,14 +60,13 @@ async def raport(interaction: discord.Interaction, item: app_commands.Choice[str
         "uid": uid,
         "item": item.value,
         "ilosc": ilosc,
-        "jednostka": jednostka,
         "kwota": kwota,
         "img": None,
         "status": "oczekuje"
     })
 
     await interaction.response.send_message(
-        f"✅ Raport zapisany!\n{item.value} | {ilosc}{jednostka} = {kwota}$\n📸 Wyślij teraz screen w tym kanale!",
+        f"✅ Raport zapisany!\n{item.value} | Ilość: {ilosc} = {kwota}$\n📸 Wyślij teraz screen w tym kanale!",
         ephemeral=True
     )
 
@@ -155,7 +152,7 @@ async def weryfikacja(interaction: discord.Interaction):
             for r in raporty:
                 embed = discord.Embed(
                     title=f"UID {r['uid']}",
-                    description=f"{r['item']} | {r['ilosc']}{r['jednostka']}\n💰 {r['kwota']}$"
+                    description=f"{r['item']} | Ilość: {r['ilosc']}\n💰 {r['kwota']}$"
                 )
                 if r["img"]:
                     embed.set_image(url=r["img"])

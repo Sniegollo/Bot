@@ -4,14 +4,14 @@ from discord import app_commands
 from pymongo import MongoClient
 import os
 
-# 🔐 Token i MongoDB URL z ENV
 TOKEN = os.getenv("TOKEN")
 MONGO_URL = os.getenv("MONGO_URL")
 
-# 🍃 MongoDB
 client = MongoClient(MONGO_URL)
 db = client["discord_bot"]
+
 collection = db["raporty"]
+config_collection = db["config"]
 
 intents = discord.Intents.default()
 intents.message_content = True
@@ -19,150 +19,208 @@ intents.members = True
 
 bot = commands.Bot(command_prefix="!", intents=intents)
 
-# 📜 CENNIK
-CENNIK = {
-    "Leszcz": 1400,
-    "Karmazyn": 2000,
-    "Płoć": 1600,
-    "Karaś srebrzysty": 1450,
-    "Vobla": 1200,
-    "Sum brązowy": 1400,
-    "Ruda żelaza": 50,
-    "Ruda złota": 600
-}
-
-RYBY = ["Leszcz", "Karmazyn", "Płoć", "Karaś srebrzysty", "Vobla", "Sum brązowy"]
-
+# 🟢 READY
 @bot.event
 async def on_ready():
     await bot.tree.sync()
     print(f"Zalogowano jako {bot.user}")
 
-# 📊 RAPORT z możliwością przesłania screena
+# 🟢 PANEL
+@bot.tree.command(name="panel")
+async def panel(interaction: discord.Interaction):
+    if interaction.user.id != interaction.guild.owner_id:
+        await interaction.response.send_message("❌ Tylko właściciel", ephemeral=True)
+        return
+
+    if config_collection.find_one({"guild_id": interaction.guild.id}):
+        await interaction.response.send_message("⚠️ Panel już istnieje", ephemeral=True)
+        return
+
+    config_collection.insert_one({
+        "guild_id": interaction.guild.id,
+        "cennik": {},
+        "role_raport": [],
+        "role_weryfikacja": [],
+        "role_premie": []
+    })
+
+    await interaction.response.send_message("✅ Panel utworzony!", ephemeral=True)
+
+# 🟢 PANEL EDIT
+@bot.tree.command(name="panel_edit")
+@app_commands.describe(tryb="Tryb", nazwa="Item", cena="Cena", rola="Rola")
+@app_commands.choices(tryb=[
+    app_commands.Choice(name="Cennik", value="cennik"),
+    app_commands.Choice(name="Raport", value="raport"),
+    app_commands.Choice(name="Weryfikacja", value="weryfikacja"),
+    app_commands.Choice(name="Premie", value="premie")
+])
+async def panel_edit(interaction: discord.Interaction, tryb: app_commands.Choice[str], nazwa: str = None, cena: int = None, rola: discord.Role = None):
+
+    if interaction.user.id != interaction.guild.owner_id:
+        await interaction.response.send_message("❌ Tylko właściciel", ephemeral=True)
+        return
+
+    config = config_collection.find_one({"guild_id": interaction.guild.id})
+
+    if not config:
+        await interaction.response.send_message("❌ Najpierw /panel", ephemeral=True)
+        return
+
+    if tryb.value == "cennik":
+        config_collection.update_one(
+            {"guild_id": interaction.guild.id},
+            {"$set": {f"cennik.{nazwa}": cena}}
+        )
+        await interaction.response.send_message("✅ Dodano do cennika", ephemeral=True)
+
+    elif tryb.value == "raport":
+        config_collection.update_one(
+            {"guild_id": interaction.guild.id},
+            {"$addToSet": {"role_raport": rola.id}}
+        )
+        await interaction.response.send_message("✅ Rola raport ustawiona", ephemeral=True)
+
+    elif tryb.value == "weryfikacja":
+        config_collection.update_one(
+            {"guild_id": interaction.guild.id},
+            {"$addToSet": {"role_weryfikacja": rola.id}}
+        )
+        await interaction.response.send_message("✅ Rola weryfikacji ustawiona", ephemeral=True)
+
+    elif tryb.value == "premie":
+        config_collection.update_one(
+            {"guild_id": interaction.guild.id},
+            {"$addToSet": {"role_premie": rola.id}}
+        )
+        await interaction.response.send_message("✅ Rola premii ustawiona", ephemeral=True)
+
+# 🟢 RAPORT
 @bot.tree.command(name="raport")
-@app_commands.choices(item=[app_commands.Choice(name=n, value=n) for n in CENNIK.keys()])
-@app_commands.describe(uid="Twój UID w grze", ilosc="Ilość przedmiotu", screen="Załącz screen")
-async def raport(interaction: discord.Interaction, item: app_commands.Choice[str], uid: str, ilosc: int, screen: discord.Attachment):
-    if "Blake Family" not in [r.name for r in interaction.user.roles]:
+@app_commands.describe(uid="UID", item="Item", ilosc="Ilość", screen="Screen")
+async def raport(interaction: discord.Interaction, uid: str, item: str, ilosc: int, screen: discord.Attachment):
+
+    config = config_collection.find_one({"guild_id": interaction.guild.id})
+
+    if not config:
+        await interaction.response.send_message("❌ Brak konfiguracji (/panel)", ephemeral=True)
+        return
+
+    if not any(r.id in config["role_raport"] for r in interaction.user.roles):
         await interaction.response.send_message("❌ Brak dostępu", ephemeral=True)
         return
 
-    # Liczymy kwotę
-    if item.value in RYBY:
-        kwota = CENNIK[item.value] * (ilosc / 1000)
+    cennik = config["cennik"]
+
+    if item not in cennik:
+        await interaction.response.send_message("❌ Nie ma w cenniku", ephemeral=True)
+        return
+
+    # ryby /1000
+    if item.lower() not in ["ruda żelaza", "ruda złota"]:
+        kwota = cennik[item] * (ilosc / 1000)
     else:
-        kwota = CENNIK[item.value] * ilosc
+        kwota = cennik[item] * ilosc
 
-    report_id = collection.count_documents({}) + 1
-
-    # Zapis raportu z linkiem do screena
     collection.insert_one({
-        "id": report_id,
-        "user_id": interaction.user.id,
+        "guild_id": interaction.guild.id,
         "uid": uid,
-        "item": item.value,
+        "item": item,
         "ilosc": ilosc,
         "kwota": kwota,
-        "img": screen.url if screen else None,
+        "img": screen.url,
         "status": "oczekuje"
     })
 
-    await interaction.response.send_message(
-        f"✅ Raport zapisany!\n{item.value} | Ilość: {ilosc} = {int(kwota)}$\n📸 Screen dodany!",
-        ephemeral=True
-    )
+    await interaction.response.send_message(f"✅ Dodano raport ({int(kwota)}$)", ephemeral=True)
 
-# 📊 STATUS
+# 🟢 STATUS
 @bot.tree.command(name="status")
 async def status(interaction: discord.Interaction, uid: str):
-    if "Blake Family" not in [r.name for r in interaction.user.roles]:
+
+    config = config_collection.find_one({"guild_id": interaction.guild.id})
+
+    if not any(r.id in config["role_raport"] for r in interaction.user.roles):
         await interaction.response.send_message("❌ Brak dostępu", ephemeral=True)
         return
 
-    raporty = collection.find({"uid": uid, "status": "zaakceptowany"})
-    suma = 0
-    count = 0
-    for r in raporty:
-        suma += r["kwota"]
-        count += 1
+    raporty = collection.find({
+        "guild_id": interaction.guild.id,
+        "uid": uid,
+        "status": "zaakceptowany"
+    })
 
-    await interaction.response.send_message(
-        f"📊 Raporty zaakceptowane: {count}\n💰 Zarobek: {int(suma)}$",
-        ephemeral=True
-    )
+    suma = sum(r["kwota"] for r in raporty)
 
-# 💰 PREMIE (widoczne dla wszystkich) + reset raportów
+    await interaction.response.send_message(f"💰 {int(suma)}$", ephemeral=True)
+
+# 🟢 PREMIE
 @bot.tree.command(name="premie")
 async def premie(interaction: discord.Interaction):
-    # 🔹 Sprawdzenie po ID roli
-    if 1487776187848724496 not in [r.id for r in interaction.user.roles]:
+
+    config = config_collection.find_one({"guild_id": interaction.guild.id})
+
+    if not any(r.id in config["role_premie"] for r in interaction.user.roles):
         await interaction.response.send_message("❌ Brak dostępu", ephemeral=True)
         return
 
-    raporty = collection.find({"status": "zaakceptowany"})
+    raporty = collection.find({
+        "guild_id": interaction.guild.id,
+        "status": "zaakceptowany"
+    })
+
     suma = {}
     for r in raporty:
-        uid = r["uid"]
-        suma[uid] = suma.get(uid, 0) + r["kwota"]
+        suma[r["uid"]] = suma.get(r["uid"], 0) + r["kwota"]
 
     text = ""
     for uid, kwota in suma.items():
         text += f"{uid};{int(kwota)};Premia\n"
 
-    await interaction.response.send_message(text or "Brak danych", ephemeral=False)
+    await interaction.response.send_message(text or "Brak danych")
 
-    # 🔹 Resetujemy zaakceptowane raporty
-    collection.delete_many({"status": "zaakceptowany"})
-    
-# 🔘 PRZYCISKI do weryfikacji
-class VerifyButtons(discord.ui.View):
-    def __init__(self, report_id):
-        super().__init__(timeout=None)
-        self.report_id = report_id
+    collection.delete_many({
+        "guild_id": interaction.guild.id,
+        "status": "zaakceptowany"
+    })
 
-    @discord.ui.button(label="✅ Akceptuj", style=discord.ButtonStyle.success)
-    async def accept(self, interaction: discord.Interaction, button: discord.ui.Button):
-        collection.update_one({"id": self.report_id}, {"$set": {"status": "zaakceptowany"}})
-        await interaction.response.send_message("✅ Zaakceptowano", ephemeral=True)
-        await interaction.message.delete()
-
-    @discord.ui.button(label="❌ Odrzuć", style=discord.ButtonStyle.danger)
-    async def reject(self, interaction: discord.Interaction, button: discord.ui.Button):
-        collection.update_one({"id": self.report_id}, {"$set": {"status": "odrzucony"}})
-        await interaction.response.send_message("❌ Odrzucono", ephemeral=True)
-        await interaction.message.delete()
-
-# 👑 WERYFIKACJA
+# 🟢 WERYFIKACJA
 @bot.tree.command(name="weryfikacja")
 async def weryfikacja(interaction: discord.Interaction):
-    if "Zarząd Blake Family" not in [r.name for r in interaction.user.roles]:
+
+    config = config_collection.find_one({"guild_id": interaction.guild.id})
+
+    if not any(r.id in config["role_weryfikacja"] for r in interaction.user.roles):
         await interaction.response.send_message("❌ Brak dostępu", ephemeral=True)
         return
 
-    uids = collection.distinct("uid", {"status": "oczekuje"})
-    if not uids:
-        await interaction.response.send_message("Brak raportów", ephemeral=True)
-        return
+    raporty = collection.find({
+        "guild_id": interaction.guild.id,
+        "status": "oczekuje"
+    })
 
-    class UIDSelect(discord.ui.Select):
-        def __init__(self):
-            options = [discord.SelectOption(label=uid) for uid in uids]
-            super().__init__(placeholder="Wybierz UID", options=options)
+    for r in raporty:
+        embed = discord.Embed(
+            title=f"UID {r['uid']}",
+            description=f"{r['item']} | {r['ilosc']}\n💰 {int(r['kwota'])}$"
+        )
+        embed.set_image(url=r["img"])
 
-        async def callback(self, interaction: discord.Interaction):
-            raporty = collection.find({"uid": self.values[0], "status": "oczekuje"})
-            for r in raporty:
-                embed = discord.Embed(
-                    title=f"UID {r['uid']}",
-                    description=f"{r['item']} | Ilość: {r['ilosc']}\n💰 {int(r['kwota'])}$"
-                )
-                if r["img"]:
-                    embed.set_image(url=r["img"])
-                await interaction.user.send(embed=embed, view=VerifyButtons(r["id"]))  # prywatnie
-            await interaction.response.send_message("📨 Raporty wysłane prywatnie", ephemeral=True)
+        view = discord.ui.View()
 
-    view = discord.ui.View()
-    view.add_item(UIDSelect())
-    await interaction.response.send_message("Wybierz UID:", view=view, ephemeral=True)
+        async def accept(i):
+            collection.update_one(r, {"$set": {"status": "zaakceptowany"}})
+            await i.message.delete()
+
+        async def reject(i):
+            collection.update_one(r, {"$set": {"status": "odrzucony"}})
+            await i.message.delete()
+
+        view.add_item(discord.ui.Button(label="✅", style=discord.ButtonStyle.success, custom_id=str(r["_id"])))
+        view.add_item(discord.ui.Button(label="❌", style=discord.ButtonStyle.danger, custom_id=str(r["_id"])))
+
+        await interaction.user.send(embed=embed)
+
+    await interaction.response.send_message("📨 Wysłano raporty na priv", ephemeral=True)
 
 bot.run(TOKEN)

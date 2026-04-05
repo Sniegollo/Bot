@@ -4,7 +4,7 @@ from discord import app_commands
 from pymongo import MongoClient
 import os
 
-# 🔐 Bezpieczny token i MongoDB URL
+# 🔐 Bezpieczny token i MongoDB URL z ENV
 TOKEN = os.getenv("TOKEN")
 MONGO_URL = os.getenv("MONGO_URL")
 
@@ -19,15 +19,15 @@ intents.members = True
 
 bot = commands.Bot(command_prefix="!", intents=intents)
 
-# 📜 CENNIK (liczymy za 1 sztukę rudy / 1000 sztuk ryb)
+# 📜 CENNIK
 CENNIK = {
-    "Leszcz": 1400,           # cena za 1000 sztuk
+    "Leszcz": 1400,
     "Karmazyn": 2000,
     "Płoć": 1600,
     "Karaś srebrzysty": 1450,
     "Vobla": 1200,
     "Sum brązowy": 1400,
-    "Ruda żelaza": 50,        # cena za 1 sztukę
+    "Ruda żelaza": 50,
     "Ruda złota": 600
 }
 
@@ -38,22 +38,24 @@ async def on_ready():
     await bot.tree.sync()
     print(f"Zalogowano jako {bot.user}")
 
-# 📊 RAPORT
+# 📊 RAPORT z możliwością przesłania screena
 @bot.tree.command(name="raport")
 @app_commands.choices(item=[app_commands.Choice(name=n, value=n) for n in CENNIK.keys()])
-async def raport(interaction: discord.Interaction, item: app_commands.Choice[str], uid: str, ilosc: int):
+@app_commands.describe(uid="Twój UID w grze", ilosc="Ilość przedmiotu", screen="Załącz screen")
+async def raport(interaction: discord.Interaction, item: app_commands.Choice[str], uid: str, ilosc: int, screen: discord.Attachment):
     if "Blake Family" not in [r.name for r in interaction.user.roles]:
         await interaction.response.send_message("❌ Brak dostępu", ephemeral=True)
         return
 
     # Liczymy kwotę
     if item.value in RYBY:
-        kwota = CENNIK[item.value] * (ilosc / 1000)  # ilość podzielona przez 1000
+        kwota = CENNIK[item.value] * (ilosc / 1000)  # ryby: ilość dzielona przez 1000
     else:
         kwota = CENNIK[item.value] * ilosc
 
     report_id = collection.count_documents({}) + 1
 
+    # Zapis raportu z linkiem do screena
     collection.insert_one({
         "id": report_id,
         "user_id": interaction.user.id,
@@ -61,28 +63,14 @@ async def raport(interaction: discord.Interaction, item: app_commands.Choice[str
         "item": item.value,
         "ilosc": ilosc,
         "kwota": kwota,
-        "img": None,
+        "img": screen.url if screen else None,
         "status": "oczekuje"
     })
 
     await interaction.response.send_message(
-        f"✅ Raport zapisany!\n{item.value} | Ilość: {ilosc} = {kwota}$\n📸 Wyślij teraz screen w tym kanale!",
+        f"✅ Raport zapisany!\n{item.value} | Ilość: {ilosc} = {kwota}$\n📸 Screen dodany!",
         ephemeral=True
     )
-
-# 📸 Automatyczne przypisywanie screenów
-@bot.event
-async def on_message(message):
-    if message.author.bot:
-        return
-
-    if message.attachments:
-        last = collection.find_one({"user_id": message.author.id, "img": None}, sort=[("id", -1)])
-        if last:
-            collection.update_one({"id": last["id"]}, {"$set": {"img": message.attachments[0].url}})
-            await message.channel.send("📸 Screen przypisany!", ephemeral=True)
-
-    await bot.process_commands(message)
 
 # 📊 STATUS
 @bot.tree.command(name="status")

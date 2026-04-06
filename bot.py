@@ -21,7 +21,7 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 @bot.event
 async def on_ready():
     await bot.tree.sync()
-    print(f"Zalogowano jako {bot.user}")
+    print(f"Bot działa jako {bot.user}")
 
 # ---------------- PANEL ----------------
 @bot.tree.command(name="panel")
@@ -88,7 +88,7 @@ class RoleSelect(discord.ui.Select):
     async def callback(self, interaction: discord.Interaction):
         role_type = self.values[0]
 
-        class RoleModal(discord.ui.Modal, title="Ustaw ID roli"):
+        class RoleModal(discord.ui.Modal, title="Wklej ID roli"):
             role_id = discord.ui.TextInput(label="ID roli")
 
             async def on_submit(self, i: discord.Interaction):
@@ -156,80 +156,16 @@ async def panel_delete(interaction: discord.Interaction):
     config_db.delete_one({"guild_id": interaction.guild.id})
     await interaction.response.send_message("🗑 Panel usunięty", ephemeral=True)
 
-# ---------------- RAPORT MODAL ----------------
-class RaportModal(discord.ui.Modal, title="Uzupełnij raport"):
-    uid = discord.ui.TextInput(label="UID")
-    ilosc = discord.ui.TextInput(label="Ilość")
-
-    def __init__(self, item_data):
-        super().__init__()
-        self.item_data = item_data
-
-    async def on_submit(self, interaction: discord.Interaction):
-        await interaction.response.send_message(
-            "📸 Wyślij screen w tej samej rozmowie (60s)",
-            ephemeral=True
-        )
-
-        def check(m):
-            return m.author == interaction.user and m.attachments
-
-        try:
-            msg = await bot.wait_for("message", timeout=60.0, check=check)
-        except:
-            return await interaction.followup.send("❌ Brak screena", ephemeral=True)
-
-        ilosc = int(self.ilosc.value)
-        kwota = (ilosc / self.item_data["sztuki"]) * self.item_data["cena"]
-
-        raporty_db.insert_one({
-            "guild_id": interaction.guild.id,
-            "uid": self.uid.value,
-            "item": self.item_data["item"],
-            "ilosc": ilosc,
-            "kwota": kwota,
-            "img": msg.attachments[0].url,
-            "status": "oczekuje"
-        })
-
-        embed = discord.Embed(title="✅ RAPORT DODANY", color=discord.Color.green())
-        embed.add_field(name="📦 Item", value=self.item_data["item"])
-        embed.add_field(name="🔢 Ilość", value=ilosc)
-        embed.add_field(name="💰 Kwota", value=f"{int(kwota)}$")
-
-        await interaction.followup.send(embed=embed, ephemeral=True)
-
-# ---------------- SELECTY ----------------
-class ItemSelect(discord.ui.Select):
-    def __init__(self, items):
-        self.items = items
-        options = [
-            discord.SelectOption(label=i["item"], description=f"{i['cena']}$/{i['sztuki']}")
-            for i in items[:25]
-        ]
-        super().__init__(placeholder="Wybierz item", options=options)
-
-    async def callback(self, interaction):
-        selected = next(i for i in self.items if i["item"] == self.values[0])
-        await interaction.response.send_modal(RaportModal(selected))
-
-class KatSelect(discord.ui.Select):
-    def __init__(self, kategorie):
-        self.kategorie = kategorie
-        options = [discord.SelectOption(label=k["nazwa"]) for k in kategorie]
-        super().__init__(placeholder="Wybierz kategorię", options=options)
-
-    async def callback(self, interaction):
-        kat = next(k for k in self.kategorie if k["nazwa"] == self.values[0])
-
-        view = discord.ui.View()
-        view.add_item(ItemSelect(kat["itemy"]))
-
-        await interaction.response.send_message("📦 Wybierz item:", view=view, ephemeral=True)
-
 # ---------------- RAPORT ----------------
 @bot.tree.command(name="raport")
-async def raport(interaction: discord.Interaction):
+@app_commands.describe(
+    item="Wybierz item",
+    uid="UID",
+    ilosc="Ilość",
+    screen="Screen"
+)
+async def raport(interaction: discord.Interaction, item: str, uid: str, ilosc: int, screen: discord.Attachment):
+
     cfg = config_db.find_one({"guild_id": interaction.guild.id})
 
     if not cfg or not cfg["kategorie"]:
@@ -238,10 +174,50 @@ async def raport(interaction: discord.Interaction):
     if cfg["role_raport"] not in [r.id for r in interaction.user.roles]:
         return await interaction.response.send_message("❌ Brak dostępu", ephemeral=True)
 
-    view = discord.ui.View()
-    view.add_item(KatSelect(cfg["kategorie"]))
+    all_items = []
+    for kat in cfg["kategorie"]:
+        all_items.extend(kat["itemy"])
 
-    await interaction.response.send_message("📂 Wybierz kategorię:", view=view, ephemeral=True)
+    entry = next((i for i in all_items if i["item"] == item), None)
+
+    if not entry:
+        return await interaction.response.send_message("❌ Nie znaleziono itemu", ephemeral=True)
+
+    kwota = (ilosc / entry["sztuki"]) * entry["cena"]
+
+    raporty_db.insert_one({
+        "guild_id": interaction.guild.id,
+        "uid": uid,
+        "item": item,
+        "ilosc": ilosc,
+        "kwota": kwota,
+        "img": screen.url,
+        "status": "oczekuje"
+    })
+
+    embed = discord.Embed(title="✅ RAPORT DODANY", color=discord.Color.green())
+    embed.add_field(name="📦 Item", value=item)
+    embed.add_field(name="🔢 Ilość", value=ilosc)
+    embed.add_field(name="💰 Kwota", value=f"{int(kwota)}$")
+    embed.set_image(url=screen.url)
+
+    await interaction.response.send_message(embed=embed, ephemeral=True)
+
+# ---------------- AUTOCOMPLETE ITEM ----------------
+@raport.autocomplete("item")
+async def item_autocomplete(interaction: discord.Interaction, current: str):
+    cfg = config_db.find_one({"guild_id": interaction.guild.id})
+    if not cfg:
+        return []
+
+    all_items = []
+    for kat in cfg["kategorie"]:
+        all_items.extend(kat["itemy"])
+
+    return [
+        app_commands.Choice(name=i["item"], value=i["item"])
+        for i in all_items if current.lower() in i["item"].lower()
+    ][:25]
 
 # ---------------- STATUS ----------------
 @bot.tree.command(name="status")

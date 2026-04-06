@@ -21,7 +21,7 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 @bot.event
 async def on_ready():
     await bot.tree.sync()
-    print(f"Bot działa jako {bot.user}")
+    print(f"Zalogowano jako {bot.user}")
 
 # ---------------- PANEL ----------------
 @bot.tree.command(name="panel")
@@ -159,12 +159,13 @@ async def panel_delete(interaction: discord.Interaction):
 # ---------------- RAPORT ----------------
 @bot.tree.command(name="raport")
 @app_commands.describe(
-    item="Wybierz item",
+    kategoria="Kategoria",
+    item="Item",
     uid="UID",
     ilosc="Ilość",
     screen="Screen"
 )
-async def raport(interaction: discord.Interaction, item: str, uid: str, ilosc: int, screen: discord.Attachment):
+async def raport(interaction: discord.Interaction, kategoria: str, item: str, uid: str, ilosc: int, screen: discord.Attachment):
 
     cfg = config_db.find_one({"guild_id": interaction.guild.id})
 
@@ -174,14 +175,13 @@ async def raport(interaction: discord.Interaction, item: str, uid: str, ilosc: i
     if cfg["role_raport"] not in [r.id for r in interaction.user.roles]:
         return await interaction.response.send_message("❌ Brak dostępu", ephemeral=True)
 
-    all_items = []
-    for kat in cfg["kategorie"]:
-        all_items.extend(kat["itemy"])
+    kat = next((k for k in cfg["kategorie"] if k["nazwa"] == kategoria), None)
+    if not kat:
+        return await interaction.response.send_message("❌ Zła kategoria", ephemeral=True)
 
-    entry = next((i for i in all_items if i["item"] == item), None)
-
+    entry = next((i for i in kat["itemy"] if i["item"] == item), None)
     if not entry:
-        return await interaction.response.send_message("❌ Nie znaleziono itemu", ephemeral=True)
+        return await interaction.response.send_message("❌ Item nie należy do tej kategorii", ephemeral=True)
 
     kwota = (ilosc / entry["sztuki"]) * entry["cena"]
 
@@ -189,6 +189,7 @@ async def raport(interaction: discord.Interaction, item: str, uid: str, ilosc: i
         "guild_id": interaction.guild.id,
         "uid": uid,
         "item": item,
+        "kategoria": kategoria,
         "ilosc": ilosc,
         "kwota": kwota,
         "img": screen.url,
@@ -196,6 +197,7 @@ async def raport(interaction: discord.Interaction, item: str, uid: str, ilosc: i
     })
 
     embed = discord.Embed(title="✅ RAPORT DODANY", color=discord.Color.green())
+    embed.add_field(name="📂 Kategoria", value=kategoria)
     embed.add_field(name="📦 Item", value=item)
     embed.add_field(name="🔢 Ilość", value=ilosc)
     embed.add_field(name="💰 Kwota", value=f"{int(kwota)}$")
@@ -203,20 +205,37 @@ async def raport(interaction: discord.Interaction, item: str, uid: str, ilosc: i
 
     await interaction.response.send_message(embed=embed, ephemeral=True)
 
-# ---------------- AUTOCOMPLETE ITEM ----------------
-@raport.autocomplete("item")
-async def item_autocomplete(interaction: discord.Interaction, current: str):
+# -------- AUTOCOMPLETE --------
+@raport.autocomplete("kategoria")
+async def kat_auto(interaction: discord.Interaction, current: str):
     cfg = config_db.find_one({"guild_id": interaction.guild.id})
     if not cfg:
         return []
 
-    all_items = []
-    for kat in cfg["kategorie"]:
-        all_items.extend(kat["itemy"])
+    return [
+        app_commands.Choice(name=k["nazwa"], value=k["nazwa"])
+        for k in cfg["kategorie"]
+        if current.lower() in k["nazwa"].lower()
+    ][:25]
+
+@raport.autocomplete("item")
+async def item_auto(interaction: discord.Interaction, current: str):
+    cfg = config_db.find_one({"guild_id": interaction.guild.id})
+    if not cfg:
+        return []
+
+    kategoria = interaction.namespace.kategoria
+    if not kategoria:
+        return []
+
+    kat = next((k for k in cfg["kategorie"] if k["nazwa"] == kategoria), None)
+    if not kat:
+        return []
 
     return [
         app_commands.Choice(name=i["item"], value=i["item"])
-        for i in all_items if current.lower() in i["item"].lower()
+        for i in kat["itemy"]
+        if current.lower() in i["item"].lower()
     ][:25]
 
 # ---------------- STATUS ----------------
